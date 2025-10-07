@@ -27,48 +27,89 @@ public class Merge2ME extends MIDlet implements CommandListener {
         else if (c == EXIT) { destroyApp(true); }
     }
 
-    public InputStream readRaw(String filename) throws Exception {
-        if (filename.startsWith("/home/")) {
-            
-        } 
-        else if (filename.startsWith("/mnt/")) { return ((FileConnection) Connector.open("file:///" + filename.substring(5), Connector.READ)).openInputStream(); } 
-        else if (filename.startsWith("/tmp/")) { return tmp.containsKey(filename = filename.substring(5)) ? new ByteArrayInputStream(((String) tmp.get(filename)).getBytes("UTF-8")) : null; } 
-        else {
-            if (filename.startsWith("/dev/")) {
-                filename = filename.substring(5);
-                String content = filename.equals("random") ? String.valueOf(random.nextInt(256)) : filename.equals("stdin") ? stdin.getString() : filename.equals("stdout") ? stdout.getText() : filename.equals("null") ? "\r" : filename.equals("zero") ? "\0" : null;
-                if (content != null) { return new ByteArrayInputStream(content.getBytes("UTF-8")); }
-
-                filename = "/dev/" + filename;
-            } 
-
-            InputStream is = getClass().getResourceAsStream(filename);
-            return is;
-        }
-    }
-    public String read(String filename) {
+    public String read(String filename, boolean doMIDlet) {
+        InputStream is = null;
+        RecordStore rs = null;
         try {
-            InputStream is = readRaw(filename);
-            if (is == null) { return ""; }
-            
+            if (doMIDlet) {
+                if (filename.startsWith("/")) {
+                    is = getClass().getResourceAsStream(filename);
+                    if (is == null) { return ""; }
+                }
+                else {
+                    String rmsName = filename.substring(6);
+                    rs = RecordStore.openRecordStore(rmsName, false);
+                    if (rs == null || rs.getNumRecords() == 0) return "";
+                    byte[] rec = rs.getRecord(1);
+                    return new String(rec, "UTF-8");
+                }
+            } 
+            else {
+                FileConnection fc = null;
+                try {
+                    fc = (FileConnection) Connector.open("file://" + filename);
+                    if (!fc.exists()) { return ""; }
+                    is = fc.openInputStream();
+                } catch (Exception e) { return ""; }
+            }
+
             InputStreamReader reader = new InputStreamReader(is, "UTF-8");
             StringBuffer sb = new StringBuffer();
             int ch;
-            while ((ch = reader.read()) != -1) { sb.append((char) ch); }
+            while ((ch = reader.read()) != -1) sb.append((char) ch);
             reader.close();
             is.close();
-            
-            return filename.startsWith("/home/") ? sb.toString() : env(sb.toString());
-        } catch (Exception e) { return ""; }
-    }
-    public String loadRMS(String filename) {
-        RecordStore rs = null;
-        try {
-            rs = RecordStore.openRecordStore(filename.substring(6), false);
-            if (rs.getNumRecords() > 0) { return new ByteArrayInputStream(rs.getRecord(1)); }
-        } finally { if (rs != null) { rs.closeRecordStore(); } }
 
-        return null;
+            return sb.toString();
+        } 
+        catch (Exception e) { return ""; } 
+        finally {
+            try {
+                if (rs != null) rs.closeRecordStore();
+                if (is != null) is.close();
+            } catch (Exception e) {}
+        }
+    }
+    public boolean write(String filename, String content, boolean doMIDlet) {
+        OutputStream os = null;
+        RecordStore rs = null;
+
+        try {
+            if (doMIDlet) {
+                if (filename.startsWith("/")) { return false; }
+                else {
+                    rs = RecordStore.openRecordStore(filename.substring(6), true);
+
+                    byte[] data = content.getBytes("UTF-8");
+                    if (rs.getNumRecords() == 0) { rs.addRecord(data, 0, data.length); }
+                    else { rs.setRecord(1, data, 0, data.length); }
+
+                    return true;
+                }
+            } 
+            else {
+                FileConnection fc = null;
+                try {
+                    fc = (FileConnection) Connector.open("file://" + filename);
+
+                    if (!fc.exists()) fc.create();
+
+                    os = fc.openOutputStream();
+                    os.write(content.getBytes("UTF-8"));
+                    os.flush();
+                    return true;
+                } catch (Exception e) { return false; }
+            }
+        } 
+        catch (Exception e) { return false; } 
+        finally {
+            try {
+                if (rs != null) rs.closeRecordStore();
+                if (os != null) os.close();
+            } catch (Exception e) {}
+        }
+
+        return false;
     }
 
     public int warnCommand(String title, String message, Command[] CMDS) { 
